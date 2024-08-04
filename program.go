@@ -33,7 +33,7 @@ func main() {
 		}
 		mdResults := agent.FormatSearchResultsAsMarkdown(webResults)
 		clickableUrls := &Urls{}
-		err = webSearchAgent.Json(fmt.Sprintf("Which urls in this result set are worth clicking on to answer the request below? You can only click on up to 5.\n----\nOriginal Request: %s\n", mdResults), clickableUrls)
+		err = webSearchAgent.Json(fmt.Sprintf("Which urls in this result set are worth clicking on to answer the request below? You can only click on up to 3.\n----\nOriginal Request: %s\n", mdResults), clickableUrls)
 		if err != nil {
 			log.Printf("Warning: %v\n", err)
 			continue
