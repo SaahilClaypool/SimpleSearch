@@ -14,8 +14,11 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
-func Make(sysMsg string) LLM {
+func Make(sysMsg string, big bool) LLM {
 	chatModel := os.Getenv("CHAT_MODEL")
+	if big {
+		chatModel = os.Getenv("CHAT_BIG_MODEL")
+	}
 	endpoint := os.Getenv("CHAT_ENDPOINT")
 	key := os.Getenv("CHAT_KEY")
 	return func(prompt string, sys2 string, json bool) (string, error) {
