@@ -96,7 +96,6 @@ func Search(query string) ([]SearchResult, error) {
 	}
 	output := make([]SearchResult, 0)
 	for _, result := range (data["organic"]).([]any) {
-		fmt.Printf("Result: %v\n", result)
 		resultMap := result.(map[string]any)
 		searchResult := SearchResult{
 			Url:     resultMap["link"].(string),

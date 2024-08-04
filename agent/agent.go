@@ -24,7 +24,8 @@ func Make(sysMsg string, big bool) LLM {
 	return func(prompt string, sys2 string, json bool) (string, error) {
 		config := openai.DefaultConfig(key)
 		config.BaseURL = endpoint
-		sys2 = sysMsg + "\n" + sys2
+		sys2 = StripLinePadding(sysMsg + "\n" + sys2)
+		prompt = StripLinePadding(prompt)
 		client := openai.NewClientWithConfig(config)
 		log.Printf("[System]: %s\n[User]: %s\n", sys2, prompt)
 		responseFormat := &openai.ChatCompletionResponseFormat{Type: openai.ChatCompletionResponseFormatTypeText}
@@ -39,19 +40,18 @@ func Make(sysMsg string, big bool) LLM {
 				Messages: []openai.ChatCompletionMessage{
 					{
 						Role:    openai.ChatMessageRoleSystem,
-						Content: strings.TrimSpace(sys2),
+						Content: sys2,
 					},
 					{
 						Role:    openai.ChatMessageRoleUser,
-						Content: strings.TrimSpace(prompt),
+						Content: prompt,
 					},
 				},
 			},
 		)
 
 		if err != nil {
-			fmt.Printf("ChatCompletion error: %v\n", err)
-			return "", err
+			return "", fmt.Errorf("Chat completion error: %w", err)
 		}
 
 		content := resp.Choices[0].Message.Content
@@ -105,4 +105,12 @@ func ExtractLastCodeBlock(markdown string) string {
 	}
 
 	return lastMatch[1]
+}
+
+func StripLinePadding(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimLeft(line, " \t")
+	}
+	return strings.Join(lines, "\n")
 }
