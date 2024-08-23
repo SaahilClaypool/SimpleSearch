@@ -9,7 +9,7 @@ import (
 
 func main() {
 	input := os.Args[1]
-	res, err := agent.Research(input, 2, 2)
+	res, err := agent.Research(input, 3, 5)
 	if err != nil {
 		panic(err)
 	}
