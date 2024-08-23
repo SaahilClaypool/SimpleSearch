@@ -21,7 +21,7 @@ func Make(sysMsg string, big bool) LLM {
 	}
 	endpoint := os.Getenv("CHAT_ENDPOINT")
 	key := os.Getenv("CHAT_KEY")
-	return func(prompt string, sys2 string, json bool) (string, error) {
+	fn := func(prompt string, sys2 string, json bool) (string, error) {
 		config := openai.DefaultConfig(key)
 		config.BaseURL = endpoint
 		sys2 = StripLinePadding(sysMsg + "\n" + sys2)
@@ -32,23 +32,24 @@ func Make(sysMsg string, big bool) LLM {
 		if json {
 			responseFormat.Type = openai.ChatCompletionResponseFormatTypeJSONObject
 		}
-		resp, err := client.CreateChatCompletion(
-			context.Background(),
-			openai.ChatCompletionRequest{
-				Model:          chatModel,
-				ResponseFormat: responseFormat,
-				Messages: []openai.ChatCompletionMessage{
-					{
-						Role:    openai.ChatMessageRoleSystem,
-						Content: sys2,
+		resp, err := RetryR(3, func() (openai.ChatCompletionResponse, error) {
+			return client.CreateChatCompletion(
+				context.Background(),
+				openai.ChatCompletionRequest{
+					Model:          chatModel,
+					ResponseFormat: responseFormat,
+					Messages: []openai.ChatCompletionMessage{
+						{
+							Role:    openai.ChatMessageRoleSystem,
+							Content: sys2,
+						},
+						{
+							Role:    openai.ChatMessageRoleUser,
+							Content: prompt,
+						},
 					},
-					{
-						Role:    openai.ChatMessageRoleUser,
-						Content: prompt,
-					},
-				},
-			},
-		)
+				})
+		})
 
 		if err != nil {
 			return "", fmt.Errorf("Chat completion error: %w", err)
@@ -58,6 +59,8 @@ func Make(sysMsg string, big bool) LLM {
 		log.Printf("[Assistant]: %s\n", content)
 		return content, nil
 	}
+
+	return fn
 }
 
 type LLM func(prompt string, system string, jsonMode bool) (string, error)
@@ -113,4 +116,28 @@ func StripLinePadding(s string) string {
 		lines[i] = strings.TrimLeft(line, " \t")
 	}
 	return strings.Join(lines, "\n")
+}
+
+func Retry[Tfunc func() error](times int, fun Tfunc) error {
+	var err error
+	for i := 0; i < times; i++ {
+		err = fun()
+		if err == nil {
+			return nil
+		}
+	}
+	return err
+}
+
+func RetryR[K any, Tfunc func() (K, error)](times int, fun Tfunc) (K, error) {
+	var result K
+	var err error
+
+	err = Retry(times, func() error {
+		var tempErr error
+		result, tempErr = fun()
+		return tempErr
+	})
+
+	return result, err
 }
