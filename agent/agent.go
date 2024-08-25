@@ -87,9 +87,6 @@ func (llm LLM) Json(prompt string, output any) error {
 	}
 
 	jsonResp := ExtractLastCodeBlock(resp)
-	if err != nil {
-		return err
-	}
 	err = json.Unmarshal([]byte(jsonResp), output)
 	return err
 }
