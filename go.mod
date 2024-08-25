@@ -13,6 +13,7 @@ require (
 	github.com/invopop/jsonschema v0.12.0 // indirect
 	github.com/invopop/yaml v0.3.1 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
+	github.com/samber/lo v1.47.0 // indirect
 	github.com/sashabaranov/go-openai v1.27.1 // indirect
 	github.com/serpapi/serpapi-golang v0.0.0-20231231211704-c29ca33d5c25 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect

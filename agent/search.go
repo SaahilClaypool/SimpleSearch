@@ -3,6 +3,8 @@ package agent
 import (
 	"fmt"
 	"log"
+
+	"github.com/samber/lo"
 )
 
 func Research(input string, numSearches int, numRead int) (ResearchResult, error) {
@@ -43,24 +45,24 @@ func Research(input string, numSearches int, numRead int) (ResearchResult, error
 			log.Printf("Warning: %v\n", err)
 			continue
 		}
-		mdResults := FormatSearchResultsAsMarkdown(webResults)
-		clickableUrls := &Response[Urls]{Thoughts: []string{"{thought}"}, Answer: Urls{[]string{"{url}"}}}
-		err = webSearchAgent.Json(fmt.Sprintf(`
-		# Original Request
+		// mdResults := FormatSearchResultsAsMarkdown(webResults)
+		// clickableUrls := &Response[Urls]{Thoughts: []string{"{thought}"}, Answer: Urls{[]string{"{url}"}}}
+		// err = webSearchAgent.Json(fmt.Sprintf(`
+		// # Original Request
 
-		%s
+		// %s
 
-		# Question 
+		// # Question
 
-		Which urls in this search are worth clicking on to answer the question?
-		You can only click on up to %d.
-		`, mdResults, numRead), clickableUrls)
-		if err != nil {
-			log.Printf("Warning: %v\n", err)
-			continue
-		}
-		for _, url := range clickableUrls.Answer.Urls {
-			content, err := Article(url)
+		// Which urls in this search are worth clicking on to answer the question?
+		// You can only click on up to %d.
+		// `, mdResults, numRead), clickableUrls)
+		// if err != nil {
+		// 	log.Printf("Warning: %v\n", err)
+		// 	continue
+		// }
+		for _, url := range lo.Slice(webResults, 0, 3) {
+			article, err := Article(url.Url)
 			if err != nil {
 				log.Printf("Warning: %v\n", err)
 				continue
@@ -79,7 +81,8 @@ func Research(input string, numSearches int, numRead int) (ResearchResult, error
 				What part of the content below is useful to answer the original request?
 				Write out the relevant sections verbatim.
 				If no parts are relevant, respond with just "Irrelevant"
-				`, content.TextContent, input), "", false)
+				If its relevant, include a short summary of the full article at the bottom.
+				`, article.TextContent, input), "", false)
 			if err != nil {
 				log.Printf("Warning, failed to extract context: %v\n", err)
 				continue
@@ -88,8 +91,8 @@ func Research(input string, numSearches int, numRead int) (ResearchResult, error
 				log.Printf("Warning, no relevant section found")
 				continue
 			}
-			searchContext = fmt.Sprintf("%s\n===============\n[%s](%s)\n%s", searchContext, content.Title, url, relevant)
-			result.References = append(result.References, Reference{Title: content.Title, Url: url, Context: relevant, Full: content.TextContent})
+			searchContext = fmt.Sprintf("%s\n===============\n[%s](%s)\n%s", searchContext, article.Title, url, relevant)
+			result.References = append(result.References, Reference{Title: article.Title, Url: url.Url, Context: relevant, Full: article.TextContent})
 		}
 	}
 
@@ -120,7 +123,7 @@ func Research(input string, numSearches int, numRead int) (ResearchResult, error
 	
 	# Response
 
-	Write your full markdown response with sections here`, searchContext), true)
+	Write your full markdown response with sections here. This should be a long (2+ page) answer fulling explaining your answer.`, searchContext), true)
 	resp, err := ag(input, "", false)
 	if err != nil {
 		return result, err
