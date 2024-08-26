@@ -5,22 +5,59 @@ import (
 	"log"
 
 	"github.com/samber/lo"
+	"github.com/samber/lo/parallel"
 )
 
 func Research(input string, numSearches int, numRead int) (ResearchResult, error) {
 	result := ResearchResult{}
-	webSearchAgent := Make(`
-		You are an assistant who will help the main agent to a query in various ways.
-		The Original Request is the users original request.
-		Only use this to determine how best to answer your specific task.
-		Do not make up or add information except from the information provided.
-		
-		Before answering, write down your thoughts before answering.
-		Write up to 5 thoughts. Each thought should be a single line in a json array.
-		`, false)
+	webSearchAgent := makeHelperAgent()
 
-	// 1. do you need any information
-	searches := &Response[Searches]{Thoughts: []string{"{thought}"}, Answer: Searches{Queries: []string{"{query}"}}}
+	searches, err := createSearches(webSearchAgent, input, numSearches)
+	if err != nil {
+		return result, err
+	}
+
+	searchContext := ""
+	queryResults := make(chan struct {
+		context    string
+		references []Reference
+		err        error
+	}, len(searches.Answer.Queries))
+
+	for _, q := range searches.Answer.Queries {
+		result.Queries = append(result.Queries, q)
+		go func(query string) {
+			context, references, err := summarizeQuery(query, input, webSearchAgent)
+			queryResults <- struct {
+				context    string
+				references []Reference
+				err        error
+			}{context, references, err}
+		}(q)
+	}
+
+	for range searches.Answer.Queries {
+		queryResult := <-queryResults
+		if queryResult.err != nil {
+			log.Printf("Warning: %v\n", queryResult.err)
+			continue
+		}
+		searchContext += queryResult.context
+		result.References = append(result.References, queryResult.references...)
+	}
+
+	resp, err := summarizeContext(searchContext, input)
+	if err != nil {
+		return result, err
+	}
+
+	result.Answer = resp
+
+	return result, nil
+}
+
+func createSearches(webSearchAgent LLM, input string, numSearches int) (Response[Searches], error) {
+	searches := Response[Searches]{Thoughts: []string{"{thought}"}, Answer: Searches{Queries: []string{"{query}"}}}
 	err := webSearchAgent.Json(fmt.Sprintf(`
 		# Original Request:
 
@@ -32,23 +69,24 @@ func Research(input string, numSearches int, numRead int) (ResearchResult, error
 		Provide up to %d queries.
 		Make the queries varied, targetting different parts of the users request if it's multi part.
 		Target different domain specific keywords or sites (for example, 'stackoverflow.com how do I invert a linked list?'.
-		`, input, numSearches), searches)
-	if err != nil {
-		return result, err
-	}
+		`, input, numSearches), &searches)
+	return searches, err
+}
 
-	searchContext := ""
-	for _, q := range searches.Answer.Queries {
-		result.Queries = append(result.Queries, q)
-		queryContext, queryReferences, err := processQuery(q, input, webSearchAgent)
-		if err != nil {
-			log.Printf("Warning: %v\n", err)
-			continue
-		}
-		searchContext += queryContext
-		result.References = append(result.References, queryReferences...)
-	}
+func makeHelperAgent() LLM {
+	webSearchAgent := Make(`
+		You are an assistant who will help the main agent to a query in various ways.
+		The Original Request is the users original request.
+		Only use this to determine how best to answer your specific task.
+		Do not make up or add information except from the information provided.
+		
+		Before answering, write down your thoughts before answering.
+		Write up to 5 thoughts. Each thought should be a single line in a json array.
+		`, false)
+	return webSearchAgent
+}
 
+func summarizeContext(searchContext string, input string) (string, error) {
 	ag := Make(fmt.Sprintf(`
 	# Context
 
@@ -78,13 +116,7 @@ func Research(input string, numSearches int, numRead int) (ResearchResult, error
 
 	Write your full markdown response with sections here. This should be a long (2+ page) answer fulling explaining your answer.`, searchContext), true)
 	resp, err := ag(input, "", false)
-	if err != nil {
-		return result, err
-	}
-
-	result.Answer = resp
-
-	return result, nil
+	return resp, err
 }
 
 type Response[T any] struct {
@@ -115,7 +147,7 @@ type Reference struct {
 func startsWith(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
-func processQuery(query string, input string, webSearchAgent LLM) (string, []Reference, error) {
+func summarizeQuery(query string, input string, webSearchAgent LLM) (string, []Reference, error) {
 	var searchContext string
 	var references []Reference
 
@@ -124,22 +156,22 @@ func processQuery(query string, input string, webSearchAgent LLM) (string, []Ref
 		return "", nil, fmt.Errorf("error searching for query: %v", err)
 	}
 
-	for _, result := range lo.Slice(webResults, 0, 3) {
-		urlContext, reference, err := processURL(result.Url, input, webSearchAgent)
+	parallel.ForEach(lo.Slice(webResults, 0, 3), func(result SearchResult, _ int) {
+		urlContext, reference, err := summarizeWebPageContent(result.Url, input, webSearchAgent)
 		if err != nil {
 			log.Printf("Warning: %v\n", err)
-			continue
+			return
 		}
 		if urlContext != "" {
 			searchContext += urlContext
 			references = append(references, reference)
 		}
-	}
+	})
 
 	return searchContext, references, nil
 }
 
-func processURL(url string, input string, webSearchAgent LLM) (string, Reference, error) {
+func summarizeWebPageContent(url string, input string, webSearchAgent LLM) (string, Reference, error) {
 	article, err := Article(url)
 	if err != nil {
 		return "", Reference{}, fmt.Errorf("error fetching article: %v", err)
