@@ -40,60 +40,13 @@ func Research(input string, numSearches int, numRead int) (ResearchResult, error
 	searchContext := ""
 	for _, q := range searches.Answer.Queries {
 		result.Queries = append(result.Queries, q)
-		webResults, err := Search(q)
+		queryContext, queryReferences, err := processQuery(q, input, webSearchAgent)
 		if err != nil {
 			log.Printf("Warning: %v\n", err)
 			continue
 		}
-		// mdResults := FormatSearchResultsAsMarkdown(webResults)
-		// clickableUrls := &Response[Urls]{Thoughts: []string{"{thought}"}, Answer: Urls{[]string{"{url}"}}}
-		// err = webSearchAgent.Json(fmt.Sprintf(`
-		// # Original Request
-
-		// %s
-
-		// # Question
-
-		// Which urls in this search are worth clicking on to answer the question?
-		// You can only click on up to %d.
-		// `, mdResults, numRead), clickableUrls)
-		// if err != nil {
-		// 	log.Printf("Warning: %v\n", err)
-		// 	continue
-		// }
-		for _, url := range lo.Slice(webResults, 0, 3) {
-			article, err := Article(url.Url)
-			if err != nil {
-				log.Printf("Warning: %v\n", err)
-				continue
-			}
-			relevant, err := webSearchAgent(fmt.Sprintf(`
-				# Search Results
-
-				%s
-
-				# Original Request
-
-				%s
-
-				# Question
-
-				What part of the content below is useful to answer the original request?
-				Write out the relevant sections verbatim.
-				If no parts are relevant, respond with just "Irrelevant"
-				If its relevant, include a short summary of the full article at the bottom.
-				`, article.TextContent, input), "", false)
-			if err != nil {
-				log.Printf("Warning, failed to extract context: %v\n", err)
-				continue
-			}
-			if startsWith(relevant, "Irrelvant") {
-				log.Printf("Warning, no relevant section found")
-				continue
-			}
-			searchContext = fmt.Sprintf("%s\n===============\n[%s](%s)\n%s", searchContext, article.Title, url, relevant)
-			result.References = append(result.References, Reference{Title: article.Title, Url: url.Url, Context: relevant, Full: article.TextContent})
-		}
+		searchContext += queryContext
+		result.References = append(result.References, queryReferences...)
 	}
 
 	ag := Make(fmt.Sprintf(`
@@ -161,4 +114,49 @@ type Reference struct {
 
 func startsWith(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
+}
+func processQuery(query string, input string, webSearchAgent LLM) (string, []Reference, error) {
+	var searchContext string
+	var references []Reference
+
+	webResults, err := Search(query)
+	if err != nil {
+		return "", nil, fmt.Errorf("error searching for query: %v", err)
+	}
+
+	for _, url := range lo.Slice(webResults, 0, 3) {
+		article, err := Article(url.Url)
+		if err != nil {
+			log.Printf("Warning: %v\n", err)
+			continue
+		}
+		relevant, err := webSearchAgent(fmt.Sprintf(`
+			# Search Results
+
+			%s
+
+			# Original Request
+
+			%s
+
+			# Question
+
+			What part of the content below is useful to answer the original request?
+			Write out the relevant sections verbatim.
+			If no parts are relevant, respond with just "Irrelevant"
+			If its relevant, include a short summary of the full article at the bottom.
+			`, article.TextContent, input), "", false)
+		if err != nil {
+			log.Printf("Warning, failed to extract context: %v\n", err)
+			continue
+		}
+		if startsWith(relevant, "Irrelvant") {
+			log.Printf("Warning, no relevant section found")
+			continue
+		}
+		searchContext = fmt.Sprintf("%s\n===============\n[%s](%s)\n%s", searchContext, article.Title, url.Url, relevant)
+		references = append(references, Reference{Title: article.Title, Url: url.Url, Context: relevant, Full: article.TextContent})
+	}
+
+	return searchContext, references, nil
 }
