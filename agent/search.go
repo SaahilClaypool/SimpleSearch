@@ -124,39 +124,53 @@ func processQuery(query string, input string, webSearchAgent LLM) (string, []Ref
 		return "", nil, fmt.Errorf("error searching for query: %v", err)
 	}
 
-	for _, url := range lo.Slice(webResults, 0, 3) {
-		article, err := Article(url.Url)
+	for _, result := range lo.Slice(webResults, 0, 3) {
+		urlContext, reference, err := processURL(result.Url, input, webSearchAgent)
 		if err != nil {
 			log.Printf("Warning: %v\n", err)
 			continue
 		}
-		relevant, err := webSearchAgent(fmt.Sprintf(`
-			# Search Results
-
-			%s
-
-			# Original Request
-
-			%s
-
-			# Question
-
-			What part of the content below is useful to answer the original request?
-			Write out the relevant sections verbatim.
-			If no parts are relevant, respond with just "Irrelevant"
-			If its relevant, include a short summary of the full article at the bottom.
-			`, article.TextContent, input), "", false)
-		if err != nil {
-			log.Printf("Warning, failed to extract context: %v\n", err)
-			continue
+		if urlContext != "" {
+			searchContext += urlContext
+			references = append(references, reference)
 		}
-		if startsWith(relevant, "Irrelvant") {
-			log.Printf("Warning, no relevant section found")
-			continue
-		}
-		searchContext = fmt.Sprintf("%s\n===============\n[%s](%s)\n%s", searchContext, article.Title, url.Url, relevant)
-		references = append(references, Reference{Title: article.Title, Url: url.Url, Context: relevant, Full: article.TextContent})
 	}
 
 	return searchContext, references, nil
+}
+
+func processURL(url string, input string, webSearchAgent LLM) (string, Reference, error) {
+	article, err := Article(url)
+	if err != nil {
+		return "", Reference{}, fmt.Errorf("error fetching article: %v", err)
+	}
+
+	relevant, err := webSearchAgent(fmt.Sprintf(`
+		# Search Results
+
+		%s
+
+		# Original Request
+
+		%s
+
+		# Question
+
+		What part of the content below is useful to answer the original request?
+		Write out the relevant sections verbatim.
+		If no parts are relevant, respond with just "Irrelevant"
+		If its relevant, include a short summary of the full article at the bottom.
+		`, article.TextContent, input), "", false)
+	if err != nil {
+		return "", Reference{}, fmt.Errorf("failed to extract context: %v", err)
+	}
+
+	if startsWith(relevant, "Irrelevant") {
+		return "", Reference{}, nil
+	}
+
+	urlContext := fmt.Sprintf("\n===============\n[%s](%s)\n%s", article.Title, url, relevant)
+	reference := Reference{Title: article.Title, Url: url, Context: relevant, Full: article.TextContent}
+
+	return urlContext, reference, nil
 }
